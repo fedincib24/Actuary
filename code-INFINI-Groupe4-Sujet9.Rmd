@@ -1,0 +1,341 @@
+---
+title: "Sujet 9 : Rente viagère croissante"
+output: html_document
+---
+#Groupe 4 , 4INFINI3 , 2023-2024
+
+
+```{r library , include=FALSE}
+#Installation des packages
+library(survival)
+library(MASS)
+library(fitdistrplus)
+library(npsurv)
+library(lsei)
+library(forecast)
+library(demography)
+library(StMoMo)
+library(lifecontingencies)
+library(reliaR)
+
+```
+## 1- Télécharger les données pour le pays concerné
+```{r extraction }
+uk <- hmd.mx(country = "GBRTENW", username = "imen.mnejja10@gmail.com", password = "Imen1234*/", label = "U.K")
+
+summary(uk)
+
+# par age 
+par(mfrow = c(1, 3))
+plot(uk, series = "male", datatype = "rate", main = "taux de mortalité  homme")
+plot(uk, series = "female", datatype = "rate", main = "taux de mortalité  femme")
+plot(uk, "total", datatype = "rate", main = "taux de mortalité  total")
+# par année
+par(mfrow = c(1, 3))
+plot(uk, series = "male", datatype = "rate", plot.type = "time", main = "taux de mortalité  homme", xlab = "Years")
+plot(uk, series = "female", datatype = "rate", plot.type = "time", main = "taux de mortalité  femme", xlab = "Years")
+plot(uk, "total", datatype = "rate", plot.type = "time", main = "taux de mortalité  total", xlab = "Years")
+```
+
+
+## 2- Etude de cohorte 
+```{r question }
+cohort <- function(year, rates, log = FALSE) {
+    xg <- diag(rates[, colnames(rates) >= year])
+    names(xg) <- paste(year, rownames(rates)[1:length(xg)], sep = "-x=")
+    if (log) {
+        xg <- log(xg)
+    }
+    xg
+}
+colfunc <- colorRampPalette(c("red", "blue"))
+cohort_of_cohorts <- function(years, rates, log = FALSE) {
+    xgs <- vector()
+    for (year in years)
+    {
+        xg <- diag(rates[, colnames(rates) >= year])
+        names(xg) <- paste(year, rownames(rates)[1:length(xg)], sep = "-x=")
+        if (log) {
+            xg <- log(xg)
+        }
+        xgs <- c(xgs, list(xg))
+    }
+    xgs
+}
+cohorts <- cohort_of_cohorts(uk$year, uk$rate$total, log = T)
+plot(cohort(uk$year[1], uk$rate$total, log = T), col = colfunc(length(uk$year))[1], type = "l", ylim = c(-11, 5), main = "UK: Cohortes")
+i <- 2
+for (one_cohort in cohorts) {
+    lines(one_cohort, col = colfunc(length(uk$year))[i])
+    i <- i + 1
+}
+legend(
+    legend = unique(uk$year),
+    col = colfunc(20), ncol = 5, pch = 19,
+    title = "Year", cex = 0.5, "bottomright"
+)
+plot(cohort(1955, uk$rate$total, log = TRUE),
+    col = "blue",
+    type = "l",
+    ylim = c(-11, 5),
+    main = "UK: Cohortes 1955",
+    xlab = "Age",
+    ylab = "Taux de Mortalité (log)"
+)
+
+# Ajouter la courbe pour les taux de mortalité masculins
+lines(cohort(1955, uk$rate$male, log = TRUE),
+    col = "red",
+    lty = 2
+)
+
+# Ajouter la courbe pour les taux de mortalité féminins
+lines(cohort(1955, uk$rate$female, log = TRUE),
+    col = "green",
+    lty = 3
+)
+
+# Ajouter une légende pour distinguer les trois courbes
+legend("bottomright",
+    legend = c("Total", "Male", "Female"),
+    col = c("blue", "red", "green"),
+    lty = c(1, 2, 3),
+    title = "Cohorte 1955"
+)
+
+cohort1955_t <- cohort(1955, uk$rate$total)
+ plot(uk$age, log(uk$rate$total[,"1955"]), main ='log mortality rates (UK_total, 1955)',
+      xlab = "Ages x", ylab = "log mortality rates", type = "l")
+ 
+ lines(0:(length(cohort1955_t)-1), log(cohort1955_t), main ='total log mortality rates (UK, 1955)',
+       xlab = "Ages x", ylab = "log mortality rates", type = "l",col='red')
+ 
+ legend(-4, -0.5,legend = c("lecture longitudinale", "lecture cohorte"),
+        col=c("black","red"),lty = 1, cex=0.7,
+        box.lty = 0
+ )
+
+ fit.norm<-fitdist(cohort(1955,uk$rate$total, log=T), "norm" )
+fit.norm$estimate
+
+plot(fit.norm)
+
+## Question 2: 
+#Niveau de conﬁance de 95% ===> z(alpha/2)=1.96
+ect = fit.norm$estimate["sd"]
+moy_emp = fit.norm$estimate["mean"]
+IC_inf = moy_emp-1.96*ect/sqrt(2)
+IC_sup = moy_emp+1.96*ect/sqrt(2)
+
+plot(cohort(1955, uk$rate$total, log=T),
+     col=colfunc(length(1955)), 
+     type="l",
+     ylim=c(-11,5),
+     main="UK: Cohorte ",
+     xlab = "age", 
+     ylab = "Taux de Mortalité")
+
+abline(h=moy_emp,col="blue", lwd=3, lty=2)
+abline(h=IC_inf,col="green", lwd=3, lty=2)
+abline(h=IC_sup,col="green", lwd=3, lty=2)
+```
+
+## Question 4 : Estimer les paramètres d’un modèle de Lee-Carter à partir des données historiques téléchargées (on pourra utiliser la fonction fit du package StMoMo).
+```{r lissage  }
+ # Lissage :
+## 1- Spline monotone :
+uk_ls_m <- smooth.demogdata(uk,method="mspline")
+## 2- Spline standard :
+uk_ls_s <- smooth.demogdata(uk, method="spline")
+## 3- Spline Concave :
+uk_ls_c <- smooth.demogdata(uk, method="cspline")
+## 4- Spline localement quadratique :
+uk_ls_q <- smooth.demogdata(uk, method="loess")
+# comparaison :
+plot(uk, years=2020, type="p", pch=21, ylim=c(-12, -2), main="FR: MT 2020 - Lissage")
+lines(uk_ls_m, years=2020, lty=1, col="blue")
+lines(uk_ls_s, years=2020, lty=2, col="red")
+lines(uk_ls_c, years=2020, lty=3, col="green")
+lines(uk_ls_q, years=2020, lty=4, col="black")
+legend("topleft",col=c("blue","red","green","black") ,lty=1:4, leg=c("mspline", "spline","cspline","loess"))
+
+```
+```{r Qquatre}
+ ages.fit = 0:110
+ years.fit = 1841:2021
+ lca.total <- lca(uk, series="total", adjust="dt",years =years.fit ,ages = ages.fit)
+ lca.male <- lca(uk, series="male", adjust="dt",years =years.fit ,ages = ages.fit)
+ lca.female <- lca(uk, series="female", adjust="dt",years =years.fit ,ages = ages.fit)
+
+
+plot(lca.total$ax, 
+     main = "Coef. ax sur données anglaises", 
+     xlab = "Age", 
+     ylab = "ax", 
+     type = "l", 
+     col = "blue", 
+     lty = 1)
+
+# Ajouter les coefficients ax pour la population masculine
+lines(lca.male$ax, 
+      col = "red", 
+      lty = 2)
+
+# Ajouter les coefficients ax pour la population féminine
+lines(lca.female$ax, 
+      col = "green", 
+      lty = 3)
+
+# Ajouter une légende pour distinguer les trois courbes
+legend("bottomright", 
+       legend = c("Total", "Male", "Female"), 
+       col = c("blue", "red", "green"), 
+       lty = c(1, 2, 3), 
+       title = "Catégories", 
+       cex = 0.8)
+
+
+plot(lca.total$bx, 
+     main = "Coef. bx sur données anglaises", 
+     xlab = "Age", 
+     ylab = "bx", 
+     type = "l", 
+     col = "blue", 
+     lty = 1)
+
+# Ajouter les coefficients bx pour la population masculine
+lines(lca.male$bx, 
+      col = "red", 
+      lty = 2)
+
+# Ajouter les coefficients bx pour la population féminine
+lines(lca.female$bx, 
+      col = "green", 
+      lty = 3)
+
+# Ajouter une légende pour distinguer les trois courbes
+legend("topright", 
+       legend = c("Total", "Male", "Female"), 
+       col = c("blue", "red", "green"), 
+       lty = c(1, 2, 3), 
+       title = "Catégories", 
+       cex = 0.8)
+
+       plot(lca.total$kt, 
+     main = "Coef. kt sur données anglaises", 
+     xlab = "Year", 
+     ylab = "kt", 
+     type = "l", 
+     col = "blue", 
+     lty = 1)
+
+# Ajouter les coefficients kt pour la population masculine
+lines(lca.male$kt, 
+      col = "red", 
+      lty = 2)
+
+# Ajouter les coefficients kt pour la population féminine
+lines(lca.female$kt, 
+      col = "green", 
+      lty = 3)
+
+# Ajouter une légende pour distinguer les trois courbes
+legend("topright", 
+       legend = c("Total", "Male", "Female"), 
+       col = c("blue", "red", "green"), 
+       lty = c(1, 2, 3), 
+       title = "Catégories", 
+       cex = 0.8)
+
+uk.StMoMoData<-StMoMoData(data=uk_ls_m, series = "total",type="central")
+uk.StMoMoData.Ini<-central2initial(uk.StMoMoData)
+uk.StMoMoData.Ini
+
+wxt <- genWeightMat(ages = ages.fit, years = uk.StMoMoData.Ini$years,clip = 3)
+ 
+ LC <- lc(link = "log")
+ LCfit <- fit(LC, data = uk.StMoMoData.Ini, ages.fit = ages.fit, wxt = wxt)
+LCfit
+plot(LCfit)
+```
+## Question 5:Afficher les log taux de mortalité historiques de la cohorte à l’aide de la fonction extractcohort
+```{r Qcinq}
+uk_data <- uk$rate$total
+
+# Créer un array à partir des données de taux de mortalité
+uk_rates_array <- array(uk_data, dim = c(length(uk$age), length(uk$year)), 
+                        dimnames = list(Age = uk$age, Year = uk$year))
+
+# Vérifier les dimensions et les noms des dimensions de l'array
+dim(uk_rates_array)
+dimnames(uk_rates_array)
+
+# Extraire les données de la cohorte de 1955
+cohort_1955 <- extractCohort(uk_rates_array, cohort = 1955)
+
+# Calculer les log taux de mortalité pour la cohorte de 1955
+log_mortality_1955 <- log(cohort_1955)
+
+# Tracé des taux de mortalité historiques de la cohorte de 1955
+plot(names(log_mortality_1955), log_mortality_1955, type = "l", col = "blue",
+     main = "Log Taux de Mortalité Historiques de la Cohorte de 1955",
+     xlab = "Âge", ylab = "Log Taux de Mortalité")
+
+```
+## Question 6 : Simuler un nombre N=5000 de trajectoires projetées sur 25 ans des taux de mortalité futurs 
+```{r Qsix}
+LCsim1955 <- simulate(LCfit, nsim=5000, h=25, cohort = 1955)
+plot(LCfit$years, LCfit$kt[1,],xlim=c(2020,2045), ylim=c(-255,255),
+     type="l", xlab="year", ylab="kt",
+     main="Affichage de taux de mortalité historique et projetée \n pour la cohorte 1955")
+matlines(LCsim1955$kt.s$years, LCsim1955$kt.s$sim[1,,1:20],
+         type="l", lty=1)
+```
+## VAP et Tarification 
+```{r tableSurvieCohort1955}
+# Extraire les taux de mortalité ajustés
+fitted_mx <- fitted(LCfit, type = "rates")
+
+# Extraire les taux de mortalité pour une cohorte spécifique, par exemple, 1955
+cohort_1955_mx <- extractCohort(fitted_mx, cohort = 1955)
+
+# Convertir les taux de mortalité centraux (mx) en taux de mortalité annuels (qx)
+cohort_1955_qx <- mx2qx(cohort_1955_mx)
+
+# Créer une table de mortalité à partir des taux de mortalité annuels
+cohort_1955_lifetable <- probs2lifetable(probs = cohort_1955_qx, type = "qx", name = "Cohort 1955 Lifetable")
+print(cohort_1955_lifetable)
+
+# Créer une table actuarielle
+actuarial_table_1955 <- new("actuarialtable", x = cohort_1955_lifetable@x, lx = cohort_1955_lifetable@lx, name = "Actuarial Table for Cohort 1955")
+
+# Afficher la table actuarielle
+print(actuarial_table_1955)
+
+paiements <- numeric(25)
+paiements[1:10] <- 6000
+paiements[11:15] <- 6000 * 1.20
+paiements[16:25] <- 6000 * 1.20 * 1.10
+discount_rate <- 0.03  
+
+# Calculer la valeur actuelle probable (VAP) de la rente viagère croissante
+#  à termes anticipés croissante temporaire
+
+VAP_proj_1955_temporaire <- sum(sapply(0:24, function(t) {
+  payment <- paiements[t+1]
+  survival_prob <- ifelse(t == 0, 1, pxt(actuarial_table_1955, x = 65, t = t))
+  discounted_payment <- payment / ((1 + discount_rate) ^ t)
+  return(survival_prob * discounted_payment)
+}))
+
+VAP_proj_1955_temporaire
+
+
+#tarification
+
+# Calcul des primes annuelles
+primes_annuelles <- VAP_proj_1955_temporaire / axn(actuarial_table_1955, x=65, n=25)
+print(primes_annuelles)
+
+```
+
